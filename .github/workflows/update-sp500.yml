@@ -1,0 +1,71 @@
+name: Update S&P 500 data
+
+on:
+  schedule:
+    # Runs every weekday at 22:00 UTC (~1 hour after US market close)
+    - cron: '0 22 * * 1-5'
+  workflow_dispatch:  # Allow manual triggering from the Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Fetch S&P 500 data from Stooq
+        run: |
+          curl -fsSL --retry 3 --retry-delay 5 \
+            -A "Mozilla/5.0 (compatible; sp500-tracker)" \
+            "https://stooq.com/q/d/l/?s=^spx&i=d" \
+            -o stooq.csv
+          echo "Downloaded $(wc -l < stooq.csv) lines"
+          head -3 stooq.csv
+
+      - name: Convert CSV to JSON
+        run: |
+          python3 << 'EOF'
+          import csv, json
+          from datetime import datetime, timezone
+
+          rows = []
+          with open('stooq.csv', 'r') as f:
+              reader = csv.DictReader(f)
+              for r in reader:
+                  try:
+                      rows.append({
+                          'date': r['Date'],
+                          'close': float(r['Close']),
+                      })
+                  except (KeyError, ValueError):
+                      continue
+
+          rows.sort(key=lambda x: x['date'])  # oldest -> newest
+
+          out = {
+              'updated': datetime.now(timezone.utc).isoformat(),
+              'source': 'Stooq (^SPX)',
+              'count': len(rows),
+              'data': rows,
+          }
+          with open('data.json', 'w') as f:
+              json.dump(out, f, separators=(',', ':'))
+          print(f"Wrote {len(rows)} rows to data.json")
+          print(f"Latest: {rows[-1]['date']} -> {rows[-1]['close']}")
+          EOF
+
+      - name: Commit if changed
+        run: |
+          rm -f stooq.csv
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data.json
+          if git diff --staged --quiet; then
+            echo "No changes — skipping commit"
+          else
+            git commit -m "Update S&P 500 data ($(date -u +%Y-%m-%d))"
+            git push
+          fi
