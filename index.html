@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>S&P 500 · Chandeliers interactifs</title>
+  <!-- TradingView Lightweight Charts -->
+  <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      user-select: none;
+    }
+
+    body {
+      background: #0a0c12;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Inter', system-ui, sans-serif;
+      padding: 20px;
+    }
+
+    .monitor-stage {
+      position: relative;
+      display: inline-block;
+      max-width: 1300px;
+      width: 100%;
+      margin: 0 auto;
+      background: #000;
+      border-radius: 28px;
+      box-shadow: 0 25px 45px rgba(0,0,0,0.6);
+    }
+
+    .monitor-stage img {
+      display: block;
+      width: 100%;
+      height: auto;
+      pointer-events: none;
+      border-radius: 24px;
+    }
+
+    .chart-overlay {
+      position: absolute;
+      left: 14%;
+      top: 19%;
+      width: 72%;
+      height: 62%;
+      background: transparent;
+      border-radius: 12px;
+      pointer-events: auto;
+    }
+
+    #candlestickContainer {
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      border-radius: 12px;
+    }
+
+    .drag-handle {
+      position: absolute;
+      top: -32px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(20, 22, 30, 0.85);
+      backdrop-filter: blur(12px);
+      padding: 6px 18px;
+      border-radius: 60px;
+      font-size: 13px;
+      font-weight: 500;
+      color: #ffda9e;
+      cursor: grab;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid rgba(255, 200, 100, 0.5);
+      white-space: nowrap;
+      font-family: monospace;
+    }
+    .drag-handle:active {
+      cursor: grabbing;
+    }
+    .drag-handle span {
+      font-size: 18px;
+    }
+
+    .resize-handle {
+      position: absolute;
+      bottom: 6px;
+      right: 6px;
+      width: 20px;
+      height: 20px;
+      background: rgba(255, 200, 100, 0.7);
+      border-radius: 30px;
+      cursor: nw-resize;
+      z-index: 101;
+      backdrop-filter: blur(4px);
+      border: 1px solid rgba(0,0,0,0.4);
+    }
+    .resize-handle:hover {
+      background: #ffcd7e;
+      transform: scale(1.05);
+    }
+
+    .adjust-panel {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: rgba(18, 20, 28, 0.85);
+      backdrop-filter: blur(12px);
+      padding: 12px 18px;
+      border-radius: 48px;
+      font-family: monospace;
+      font-size: 12px;
+      font-weight: 500;
+      color: #f5e2b0;
+      z-index: 1000;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      border: 1px solid rgba(255, 200, 100, 0.4);
+      pointer-events: auto;
+    }
+    .adjust-panel label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(0,0,0,0.5);
+      padding: 4px 12px;
+      border-radius: 40px;
+    }
+    .adjust-panel input {
+      width: 55px;
+      background: #0f1117;
+      border: 1px solid #ffcd7e;
+      color: #ffdfa5;
+      border-radius: 40px;
+      padding: 4px 8px;
+      text-align: center;
+    }
+    .adjust-panel button {
+      background: #f5b642;
+      border: none;
+      border-radius: 40px;
+      padding: 5px 14px;
+      font-weight: 600;
+      cursor: pointer;
+      color: #111;
+    }
+    .adjust-panel button:hover {
+      background: #ffce7c;
+      transform: scale(0.97);
+    }
+    @media (max-width: 860px) {
+      .adjust-panel { padding: 8px 14px; gap: 8px; right: 12px; bottom: 12px; }
+      .drag-handle { top: -28px; padding: 4px 14px; font-size: 11px; }
+      .resize-handle { width: 18px; height: 18px; }
+    }
+  </style>
+</head>
+<body>
+<div style="position: relative; width: 100%; display: flex; justify-content: center;">
+  <div class="monitor-stage" id="monitorStage">
+    <!-- Image fixe : image.png dans le même dossier -->
+    <img id="monitorBgImg" src="image.png" alt="Monitor background" style="width:100%; border-radius: 24px;">
+
+    <div id="graphOverlay" class="chart-overlay">
+      <div id="dragHandle" class="drag-handle">
+        <span>⋮⋮</span> DRAG TO MOVE <span>⋮⋮</span>
+      </div>
+      <div id="resizeHandle" class="resize-handle" title="Redimensionner"></div>
+      <div id="candlestickContainer"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Panneau pour ajuster position/taille -->
+<div class="adjust-panel">
+  <span style="color:#e7bf6e;">▸ POSITION</span>
+  <label>← <input type="number" id="leftVal" step="0.2" value="14.0">%</label>
+  <label>↑ <input type="number" id="topVal" step="0.2" value="19.0">%</label>
+  <label>↔ <input type="number" id="widthVal" step="0.2" value="72.0">%</label>
+  <label>↕ <input type="number" id="heightVal" step="0.2" value="62.0">%</label>
+  <button id="applyPosBtn">APPLY</button>
+  <button id="resetPosBtn">⟳ RESET</button>
+</div>
+
+<script>
+  (function() {
+    // =============================================
+    // 🔑 PUT YOUR FINNHUB API KEY HERE
+    // =============================================
+    const FINNHUB_API_KEY = "d7t5drhr01qugn09eekgd7t5drhr01qugn09eel0";
+    // =============================================
+
+    let chart = null;
+    let candlestickSeries = null;
+
+    // ---------- Données SPY via Finnhub ----------
+    async function fetchSP500Candles() {
+      try {
+        const to = Math.floor(Date.now() / 1000);
+        const from = to - 30 * 86400; // 30 derniers jours
+        const url = "https://morning-river-cdce.chris02426.workers.dev/";
+
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const json = await response.json();
+
+        if (json.s !== "ok" || !json.t || json.t.length < 2) {
+          throw new Error("Finnhub: no data or invalid response");
+        }
+
+        return json.t.map((time, i) => ({
+          time,
+          open:  json.o[i],
+          high:  json.h[i],
+          low:   json.l[i],
+          close: json.c[i]
+        }));
+
+      } catch (err) {
+        console.warn("Finnhub fetch failed, using simulated fallback:", err.message);
+        // Fallback réaliste si l'API échoue
+        const candles = [];
+        let base = 560;
+        const today = Math.floor(Date.now() / 1000);
+        for (let i = 30; i >= 0; i--) {
+          const time = today - i * 86400;
+          const change = (Math.random() - 0.48) * 4;
+          const close = base + change;
+          const open = base;
+          const high = Math.max(open, close) + Math.random() * 2;
+          const low = Math.min(open, close) - Math.random() * 2;
+          candles.push({ time, open, high, low, close: Math.max(low, Math.min(high, close)) });
+          base = close;
+        }
+        return candles;
+      }
+    }
+
+    async function initChart() {
+      const container = document.getElementById('candlestickContainer');
+      if (!container) return;
+      if (chart) chart.remove();
+
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+      if (width < 100 || height < 100) return;
+
+      chart = LightweightCharts.createChart(container, {
+        width, height,
+        layout: { background: { color: 'transparent' }, textColor: '#d1d4dc' },
+        grid: { vertLines: { color: 'rgba(42,46,57,0.3)' }, horzLines: { color: 'rgba(42,46,57,0.3)' } },
+        crosshair: { mode: LightweightCharts.CrosshairMode.Normal, vertLine: { color: '#ffcd7e' }, horzLine: { color: '#ffcd7e' } },
+        rightPriceScale: { borderColor: 'rgba(197,203,216,0.2)' },
+        timeScale: { borderColor: 'rgba(197,203,216,0.2)', timeVisible: true }
+      });
+
+      candlestickSeries = chart.addCandlestickSeries({
+        upColor: '#26a69a', downColor: '#ef5350',
+        borderDownColor: '#ef5350', borderUpColor: '#26a69a',
+        wickDownColor: '#ef5350', wickUpColor: '#26a69a'
+      });
+
+      const candles = await fetchSP500Candles();
+      candlestickSeries.setData(candles);
+      chart.timeScale().fitContent();
+    }
+
+    function resizeChart() {
+      if (!chart) return;
+      const container = document.getElementById('candlestickContainer');
+      if (!container) return;
+      const w = container.clientWidth, h = container.clientHeight;
+      if (w > 0 && h > 0) {
+        chart.applyOptions({ width: w, height: h });
+        chart.timeScale().fitContent();
+      }
+    }
+
+    // ----- Drag & Resize -----
+    const overlay = document.getElementById('graphOverlay');
+    const dragHandle = document.getElementById('dragHandle');
+    let isDragging = false, startX, startY, startLeft, startTop;
+    function getPos() {
+      return { left: parseFloat(overlay.style.left) || 14, top: parseFloat(overlay.style.top) || 19 };
+    }
+    function setPos(left, top) {
+      let l = Math.min(80, Math.max(0, left));
+      let t = Math.min(80, Math.max(0, top));
+      overlay.style.left = l + '%';
+      overlay.style.top = t + '%';
+      document.getElementById('leftVal').value = l.toFixed(1);
+      document.getElementById('topVal').value = t.toFixed(1);
+      setTimeout(resizeChart, 20);
+    }
+    dragHandle.addEventListener('mousedown', (e) => {
+      if (!dragHandle.contains(e.target)) return;
+      e.preventDefault();
+      isDragging = true;
+      startX = e.clientX; startY = e.clientY;
+      const p = getPos();
+      startLeft = p.left; startTop = p.top;
+      document.body.style.cursor = 'grabbing';
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      const rect = overlay.parentElement.getBoundingClientRect();
+      setPos(startLeft + (dx / rect.width) * 100, startTop + (dy / rect.height) * 100);
+    });
+    window.addEventListener('mouseup', () => { isDragging = false; document.body.style.cursor = ''; });
+
+    const resizeHandle = document.getElementById('resizeHandle');
+    let isResizing = false, rStartX, rStartY, startW, startH, startL, startT;
+    function getSize() {
+      return {
+        left: parseFloat(overlay.style.left) || 14,
+        top: parseFloat(overlay.style.top) || 19,
+        width: parseFloat(overlay.style.width) || 72,
+        height: parseFloat(overlay.style.height) || 62
+      };
+    }
+    function setSize(left, top, width, height) {
+      let l = Math.min(80, Math.max(0, left));
+      let t = Math.min(80, Math.max(0, top));
+      let w = Math.min(92, Math.max(15, width));
+      let h = Math.min(85, Math.max(15, height));
+      if (l + w > 98) w = 98 - l;
+      if (t + h > 95) h = 95 - t;
+      overlay.style.left = l + '%';
+      overlay.style.top = t + '%';
+      overlay.style.width = w + '%';
+      overlay.style.height = h + '%';
+      document.getElementById('leftVal').value = l.toFixed(1);
+      document.getElementById('topVal').value = t.toFixed(1);
+      document.getElementById('widthVal').value = w.toFixed(1);
+      document.getElementById('heightVal').value = h.toFixed(1);
+      setTimeout(resizeChart, 30);
+    }
+    resizeHandle.addEventListener('mousedown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      isResizing = true;
+      rStartX = e.clientX; rStartY = e.clientY;
+      const s = getSize();
+      startL = s.left; startT = s.top; startW = s.width; startH = s.height;
+      document.body.style.cursor = 'nw-resize';
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!isResizing) return;
+      const dx = e.clientX - rStartX;
+      const dy = e.clientY - rStartY;
+      const rect = overlay.parentElement.getBoundingClientRect();
+      const dw = (dx / rect.width) * 100;
+      const dh = (dy / rect.height) * 100;
+      setSize(startL, startT, startW + dw, startH + dh);
+    });
+    window.addEventListener('mouseup', () => { isResizing = false; document.body.style.cursor = ''; });
+
+    // Contrôles numériques
+    const leftInp = document.getElementById('leftVal');
+    const topInp = document.getElementById('topVal');
+    const widthInp = document.getElementById('widthVal');
+    const heightInp = document.getElementById('heightVal');
+    const applyBtn = document.getElementById('applyPosBtn');
+    const resetBtn = document.getElementById('resetPosBtn');
+    function applyInputs() {
+      let l = parseFloat(leftInp.value), t = parseFloat(topInp.value);
+      let w = parseFloat(widthInp.value), h = parseFloat(heightInp.value);
+      if (isNaN(l)) l = 14; if (isNaN(t)) t = 19;
+      if (isNaN(w)) w = 72; if (isNaN(h)) h = 62;
+      setSize(l, t, w, h);
+    }
+    applyBtn.addEventListener('click', applyInputs);
+    resetBtn.addEventListener('click', () => setSize(14, 19, 72, 62));
+
+    // Rafraîchissement auto toutes les 5 min
+    let refreshInterval;
+    async function refreshData() {
+      if (candlestickSeries) {
+        const candles = await fetchSP500Candles();
+        candlestickSeries.setData(candles);
+        chart.timeScale().fitContent();
+      }
+    }
+    function startAutoRefresh() {
+      if (refreshInterval) clearInterval(refreshInterval);
+      refreshInterval = setInterval(refreshData, 300000);
+    }
+
+    // Initialisation
+    async function init() {
+      overlay.style.left = "14%"; overlay.style.top = "19%";
+      overlay.style.width = "72%"; overlay.style.height = "62%";
+      await initChart();
+      startAutoRefresh();
+      window.addEventListener('resize', () => setTimeout(resizeChart, 100));
+      new ResizeObserver(() => resizeChart()).observe(document.getElementById('candlestickContainer'));
+      const img = document.getElementById('monitorBgImg');
+      if (img.complete) setTimeout(resizeChart, 100);
+      img.addEventListener('load', () => setTimeout(resizeChart, 100));
+    }
+    init();
+  })();
+</script>
+</body>
+</html>
