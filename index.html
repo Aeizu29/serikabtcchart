@@ -44,6 +44,7 @@
       background: #000;
       border-radius: 28px;
       box-shadow: 0 25px 45px rgba(0,0,0,0.6);
+      container-type: inline-size; /* enables cqw units for children */
     }
 
     .monitor-stage img {
@@ -72,11 +73,24 @@
       border-radius: 12px;
     }
 
+    /* ============================================
+       MASTER SIZE — change this ONE number to resize
+       everything (badge + buttons) proportionally.
+       The unit "cqw" = % of the monitor-stage width,
+       so the bar stays in lockstep with the chart at
+       any browser zoom or window size.
+       Default: 0.95. Try 0.8 for smaller, 1.2 for bigger.
+       ============================================ */
+    .timeframe-bar,
+    .symbol-badge {
+      --base: 0.80cqw;
+    }
+
     .symbol-badge {
       display: flex;
       align-items: center;
-      gap: 0.5em;
-      padding: 0.25em 0.7em 0.25em 0.35em;
+      gap: calc(var(--base) * 0.5);
+      padding: calc(var(--base) * 0.27) calc(var(--base) * 0.7) calc(var(--base) * 0.27) calc(var(--base) * 0.36);
       background: rgba(20, 22, 30, 0.75);
       border: 1px solid rgba(247, 147, 26, 0.35);
       border-radius: 30px;
@@ -86,8 +100,8 @@
       flex-shrink: 0;
     }
     .symbol-badge .btc-icon {
-      width: 1.6em;
-      height: 1.6em;
+      width: calc(var(--base) * 1.6);
+      height: calc(var(--base) * 1.6);
       border-radius: 50%;
       background: #f7931a;
       display: flex;
@@ -95,13 +109,13 @@
       justify-content: center;
       color: #fff;
       font-weight: 700;
-      font-size: 1em;
+      font-size: calc(var(--base) * 1.1);
       font-family: 'Arial', sans-serif;
       line-height: 1;
     }
     .symbol-badge .pair {
       color: #fff;
-      font-size: 1em;
+      font-size: var(--base);
       font-weight: 600;
       letter-spacing: 0.3px;
     }
@@ -111,10 +125,10 @@
     }
     .symbol-badge .exchange {
       color: #5841D8;
-      font-size: 0.75em;
+      font-size: calc(var(--base) * 0.82);
       font-weight: 700;
       letter-spacing: 0.5px;
-      padding: 0.15em 0.5em;
+      padding: calc(var(--base) * 0.18) calc(var(--base) * 0.55);
       border-radius: 10px;
       background: rgba(255, 255, 255, 255);
     }
@@ -126,20 +140,19 @@
       width: 45.6%;
       display: flex;
       align-items: center;
-      gap: 0.5em;
+      gap: calc(var(--base) * 0.55);
       justify-content: flex-start;
       z-index: 10;
       pointer-events: auto;
-      font-size: 0.95vw; /* pure vw — stays proportional to chart at any browser zoom */
     }
     .timeframe-bar button {
       background: rgba(20, 22, 30, 0.75);
       border: 1px solid rgba(247, 147, 26, 0.35);
       color: #fff;
       font-family: monospace;
-      font-size: 0.95em;
+      font-size: var(--base);
       font-weight: 600;
-      padding: 0.25em 0.75em;
+      padding: calc(var(--base) * 0.27) calc(var(--base) * 0.82);
       border-radius: 30px;
       cursor: pointer;
       backdrop-filter: blur(8px);
