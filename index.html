@@ -130,7 +130,7 @@
       justify-content: flex-start;
       z-index: 10;
       pointer-events: auto;
-      font-size: clamp(8px, 0.95vw, 12px); /* scales with viewport, not browser zoom */
+      font-size: 0.95vw; /* pure vw — stays proportional to chart at any browser zoom */
     }
     .timeframe-bar button {
       background: rgba(20, 22, 30, 0.75);
@@ -230,48 +230,108 @@
     let currentInterval = 1440; // 1 day
     let currentLimit = 30;
 
-    // ---------- Données Bitcoin via Kraken (US-friendly) ----------
+    // ---------- Données Bitcoin (Kraken primary, Coinbase fallback) ----------
+    let currentSource = "KRAKEN"; // tracks which API actually served the data
+
+    async function fetchFromKraken() {
+      const url = `https://api.kraken.com/0/public/OHLC?pair=XBTUSDT&interval=${currentInterval}`;
+      const response = await fetch(url, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`Kraken HTTP ${response.status}`);
+      const json = await response.json();
+      if (json.error && json.error.length > 0) throw new Error(`Kraken: ${json.error.join(", ")}`);
+      const resultKey = Object.keys(json.result).find(k => k !== "last");
+      const raw = json.result[resultKey];
+      if (!raw || !raw.length) throw new Error("Kraken: empty result");
+      return raw.map(c => ({
+        time:  c[0],
+        open:  parseFloat(c[1]),
+        high:  parseFloat(c[2]),
+        low:   parseFloat(c[3]),
+        close: parseFloat(c[4])
+      })).slice(-currentLimit);
+    }
+
+    async function fetchFromCoinbase() {
+      // Coinbase granularity (seconds) — map our Kraken minute intervals
+      const granularityMap = {
+        1: 60, 5: 300, 15: 900, 60: 3600, 240: 21600,
+        1440: 86400, 10080: 86400, 21600: 86400 // weekly/15D fall back to daily
+      };
+      const granularity = granularityMap[currentInterval] || 86400;
+      const url = `https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=${granularity}`;
+      const response = await fetch(url, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`Coinbase HTTP ${response.status}`);
+      const data = await response.json();
+      if (!Array.isArray(data) || !data.length) throw new Error("Coinbase: empty result");
+      // Coinbase returns: [time, low, high, open, close, volume] — newest first, in seconds
+      return data
+        .map(c => ({ time: c[0], open: c[3], high: c[2], low: c[1], close: c[4] }))
+        .sort((a, b) => a.time - b.time)
+        .slice(-currentLimit);
+    }
+
     async function fetchBTCCandles() {
+      // Try Kraken first
       try {
-        const url = `https://api.kraken.com/0/public/OHLC?pair=XBTUSDT&interval=${currentInterval}`;
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const json = await response.json();
-
-        if (json.error && json.error.length > 0) {
-          throw new Error(`Kraken: ${json.error.join(", ")}`);
-        }
-
-        // Find the result key (Kraken sometimes prefixes pair names)
-        const resultKey = Object.keys(json.result).find(k => k !== "last");
-        const raw = json.result[resultKey];
-
-        // Kraken returns: [time, open, high, low, close, vwap, volume, count]
-        // Time is already in seconds
-        const candles = raw.map(c => ({
-          time:  c[0],
-          open:  parseFloat(c[1]),
-          high:  parseFloat(c[2]),
-          low:   parseFloat(c[3]),
-          close: parseFloat(c[4])
-        }));
-
-        // Trim to currentLimit (Kraken always returns up to 720)
-        return candles.slice(-currentLimit);
+        const data = await fetchFromKraken();
+        setSource("KRAKEN");
+        return data;
       } catch (err) {
-        console.warn("Kraken fetch failed:", err.message);
+        console.warn("Kraken failed, falling back to Coinbase:", err.message);
+      }
+      // Fallback: Coinbase (also US-friendly, works on Opera mobile)
+      try {
+        const data = await fetchFromCoinbase();
+        setSource("COINBASE");
+        return data;
+      } catch (err) {
+        console.warn("Coinbase fallback also failed:", err.message);
         return [];
       }
     }
 
+    // Update the exchange badge to reflect which API is currently serving data
+    function setSource(name) {
+      if (currentSource === name) return; // no change
+      currentSource = name;
+      const el = document.querySelector('.symbol-badge .exchange');
+      if (!el) return;
+      el.textContent = name;
+      if (name === "COINBASE") {
+        el.style.color = "#0857FF";
+      } else {
+        // KRAKEN — let CSS take over (whatever color you set in your stylesheet)
+        el.style.color = "";
+      }
+    }
+
+    // Wait until the chart container has valid dimensions before drawing
+    function waitForContainer(maxAttempts = 50) {
+      return new Promise((resolve) => {
+        let attempts = 0;
+        function check() {
+          const container = document.getElementById('candlestickContainer');
+          if (container && container.clientWidth >= 100 && container.clientHeight >= 100) {
+            resolve(container);
+            return;
+          }
+          if (++attempts >= maxAttempts) {
+            resolve(container); // give up after ~5s, draw anyway
+            return;
+          }
+          setTimeout(check, 100);
+        }
+        check();
+      });
+    }
+
     async function initChart() {
-      const container = document.getElementById('candlestickContainer');
+      const container = await waitForContainer();
       if (!container) return;
       if (chart) chart.remove();
 
-      const width = container.clientWidth;
-      const height = container.clientHeight;
-      if (width < 100 || height < 100) return;
+      const width = Math.max(container.clientWidth, 100);
+      const height = Math.max(container.clientHeight, 100);
 
       chart = LightweightCharts.createChart(container, {
         width, height,
@@ -289,8 +349,18 @@
       });
 
       const candles = await fetchBTCCandles();
-      candlestickSeries.setData(candles);
-      chart.timeScale().fitContent();
+      if (candles.length > 0) {
+        candlestickSeries.setData(candles);
+        chart.timeScale().fitContent();
+      }
+
+      // Force several resize passes after init to handle late layout shifts
+      [50, 200, 500, 1000].forEach(delay => {
+        setTimeout(() => {
+          resizeChart();
+          if (chart) chart.timeScale().fitContent();
+        }, delay);
+      });
     }
 
     function resizeChart() {
@@ -335,18 +405,68 @@
       });
     }
 
+    // Wait for the background image to fully load before drawing the chart
+    function waitForBgImage() {
+      return new Promise((resolve) => {
+        const img = document.getElementById('monitorBgImg');
+        if (!img) { resolve(); return; }
+        if (img.complete && img.naturalHeight !== 0) { resolve(); return; }
+        img.addEventListener('load',  () => resolve(), { once: true });
+        img.addEventListener('error', () => resolve(), { once: true });
+        setTimeout(resolve, 3000);
+      });
+    }
+
+    // Retry data fetch if it failed (helps on flaky mobile connections)
+    async function ensureDataLoaded(maxRetries = 3) {
+      for (let i = 0; i < maxRetries; i++) {
+        if (!candlestickSeries) return;
+        const candles = await fetchBTCCandles();
+        if (candles.length > 0) {
+          candlestickSeries.setData(candles);
+          chart.timeScale().fitContent();
+          return;
+        }
+        // Wait a bit longer between retries
+        await new Promise(r => setTimeout(r, 800 * (i + 1)));
+      }
+      console.warn("All data fetch attempts failed");
+    }
+
     // Initialisation
     async function init() {
       overlay.style.left = "0%"; overlay.style.top = "18%";
       overlay.style.width = "45.6%"; overlay.style.height = "25.7%";
+
+      await waitForBgImage();
       await initChart();
+
+      // If the chart loaded but no data came through, retry a few times
+      if (candlestickSeries && chart) {
+        // Check if data is empty by trying again on next tick
+        setTimeout(async () => {
+          const candles = await fetchBTCCandles();
+          if (candles.length === 0) {
+            await ensureDataLoaded();
+          } else {
+            candlestickSeries.setData(candles);
+            chart.timeScale().fitContent();
+          }
+        }, 300);
+      }
+
       setupTimeframeButtons();
       startAutoRefresh();
+
       window.addEventListener('resize', () => setTimeout(resizeChart, 100));
       new ResizeObserver(() => resizeChart()).observe(document.getElementById('candlestickContainer'));
-      const img = document.getElementById('monitorBgImg');
-      if (img.complete) setTimeout(resizeChart, 100);
-      img.addEventListener('load', () => setTimeout(resizeChart, 100));
+
+      window.addEventListener('load', () => {
+        setTimeout(() => {
+          resizeChart();
+          if (chart) chart.timeScale().fitContent();
+        }, 200);
+      });
     }
     init();
   })();
