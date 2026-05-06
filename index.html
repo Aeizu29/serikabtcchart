@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Serika Bitcoin Chart</title>
+  <title>Bitcoin · Chandeliers interactifs</title>
   <!-- TradingView Lightweight Charts -->
   <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
   <style>
@@ -18,10 +18,21 @@
       background: #0a0c12;
       min-height: 100vh;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
       font-family: 'Inter', system-ui, sans-serif;
       padding: 20px;
+      gap: 24px;
+    }
+
+    .site-logo {
+      width: 100%;
+      max-width: 460px;     /* ← change this to make the logo bigger or smaller */
+      height: auto;
+      display: block;
+      pointer-events: none;
+      user-select: none;
     }
 
     .monitor-stage {
@@ -99,13 +110,13 @@
       font-weight: 500;
     }
     .symbol-badge .exchange {
-      color: #f7931a;
+      color: #5841D8;
       font-size: 0.75em;
       font-weight: 700;
       letter-spacing: 0.5px;
       padding: 0.15em 0.5em;
       border-radius: 10px;
-      background: rgba(247, 147, 26, 0.15);
+      background: rgba(255, 255, 255, 255);
     }
 
     .timeframe-bar {
@@ -161,6 +172,8 @@
   </style>
 </head>
 <body>
+<img src="SerikaBitcoin-Chart_symbolon.png" alt="Serika Bitcoin Chart" class="site-logo">
+
 <div style="position: relative; width: 100%; display: flex; justify-content: center;">
   <div class="monitor-stage" id="monitorStage">
     <!-- Image fixe : image.png dans le même dossier -->
@@ -170,16 +183,16 @@
       <div class="symbol-badge">
         <div class="btc-icon">₿</div>
         <div class="pair">BTC<span class="quote">/USDT</span></div>
-        <div class="exchange">BINANCE</div>
+        <div class="exchange">KRAKEN</div>
       </div>
-      <button data-tf="1m"  data-limit="60">1m</button>
-      <button data-tf="5m"  data-limit="60">5m</button>
-      <button data-tf="15m" data-limit="60">15m</button>
-      <button data-tf="1h"  data-limit="48">1h</button>
-      <button data-tf="4h"  data-limit="60">4h</button>
-      <button data-tf="1d"  data-limit="30" class="active">1D</button>
-      <button data-tf="1w"  data-limit="30">1W</button>
-      <button data-tf="1M"  data-limit="24">1M</button>
+      <button data-tf="1"     data-limit="60">1m</button>
+      <button data-tf="5"     data-limit="60">5m</button>
+      <button data-tf="15"    data-limit="60">15m</button>
+      <button data-tf="60"    data-limit="48">1h</button>
+      <button data-tf="240"   data-limit="60">4h</button>
+      <button data-tf="1440"  data-limit="30" class="active">1D</button>
+      <button data-tf="10080" data-limit="30">1W</button>
+      <button data-tf="21600" data-limit="24">15D</button>
     </div>
 
     <div id="graphOverlay" class="chart-overlay">
@@ -194,26 +207,40 @@
     let candlestickSeries = null;
 
     // ---------- Timeframe state ----------
-    let currentInterval = "1d";
+    // Kraken intervals are in minutes
+    let currentInterval = 1440; // 1 day
     let currentLimit = 30;
 
-    // ---------- Données Bitcoin via Binance ----------
+    // ---------- Données Bitcoin via Kraken (US-friendly) ----------
     async function fetchBTCCandles() {
       try {
-        const url = `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=${currentInterval}&limit=${currentLimit}`;
+        const url = `https://api.kraken.com/0/public/OHLC?pair=XBTUSDT&interval=${currentInterval}`;
         const response = await fetch(url);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json();
+        const json = await response.json();
 
-        return data.map(c => ({
-          time:  c[0] / 1000,        // ms → seconds
+        if (json.error && json.error.length > 0) {
+          throw new Error(`Kraken: ${json.error.join(", ")}`);
+        }
+
+        // Find the result key (Kraken sometimes prefixes pair names)
+        const resultKey = Object.keys(json.result).find(k => k !== "last");
+        const raw = json.result[resultKey];
+
+        // Kraken returns: [time, open, high, low, close, vwap, volume, count]
+        // Time is already in seconds
+        const candles = raw.map(c => ({
+          time:  c[0],
           open:  parseFloat(c[1]),
           high:  parseFloat(c[2]),
           low:   parseFloat(c[3]),
           close: parseFloat(c[4])
         }));
+
+        // Trim to currentLimit (Kraken always returns up to 720)
+        return candles.slice(-currentLimit);
       } catch (err) {
-        console.warn("Binance fetch failed:", err.message);
+        console.warn("Kraken fetch failed:", err.message);
         return [];
       }
     }
@@ -282,7 +309,7 @@
         btn.addEventListener('click', async () => {
           buttons.forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
-          currentInterval = btn.dataset.tf;
+          currentInterval = parseInt(btn.dataset.tf, 10);
           currentLimit = parseInt(btn.dataset.limit, 10);
           await refreshData();
         });
